@@ -163,9 +163,13 @@ gradients = function(list[unknown] model,
   stride = as.integer(as.scalar(hyperparams["stride"]))
   pad = as.integer(as.scalar(hyperparams["pad"]))
   lambda = as.double(as.scalar(hyperparams["lambda"]))
-  F1 = as.integer(as.scalar(hyperparams["F1"]))
-  F2 = as.integer(as.scalar(hyperparams["F2"]))
-  N3 = as.integer(as.scalar(hyperparams["N3"]))
+
+  #F1 = as.integer(as.scalar(hyperparams["F1"]))
+  #F2 = as.integer(as.scalar(hyperparams["F2"]))
+  #N3 = as.integer(as.scalar(hyperparams["N3"]))
+
+
+
   W1 = as.matrix(model[1])
   W2 = as.matrix(model[2])
   W3 = as.matrix(model[3])
@@ -174,6 +178,16 @@ gradients = function(list[unknown] model,
   b2 = as.matrix(model[6])
   b3 = as.matrix(model[7])
   b4 = as.matrix(model[8])
+
+    F1 = nrow(b1)
+    F2 = nrow(b2)
+    b_3 = as.matrix(model[7])
+    if (nrow(b_3) == 1) {
+        N3 = ncol(b_3)
+    }
+    else {
+        N3 = nrow(b_3)
+    }
 
   # Compute forward pass
   ## layer 1: conv1 -> relu1 -> pool1

@@ -155,6 +155,11 @@ return (list[unknown] trained_model)
             # TODO make it PARALLEL --- START --------------------------------------------------------------------------
             print("Trying to run in parallel.")
 
+            selectorMatricesTemplate = list()
+            for (sIDX in 1:L) {
+                selectorMatricesTemplate = append(selectorMatricesTemplate, matrix(1,1,1))  # dummy matrix to satisfy type check
+            }
+
             # local optimization steps / IST round
             localSteps = min(j, (stepsPerEpoch-step+1))
 
@@ -175,7 +180,7 @@ return (list[unknown] trained_model)
 
             # 5.) perform 'j' local gradient steps for each subnet
             print("Started J local gradient steps FOR ALL SUBNETS SIMULTANEOUSLY...")
-            parfor (subnet in 1:numSubnets) {
+            for (subnet in 1:numSubnets) { # TODO reinstate PARFOR
 
                 # a.) obtain masked subnet
                 subnet_model = subnetModelTemplate
@@ -194,17 +199,133 @@ return (list[unknown] trained_model)
                     subnet_model_mask[subnet_p] = list(param_mask)
                 }
 
+
+
+                # TODO.) obtain mask selector matrices - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+                selectorMatrices = selectorMatricesTemplate
+                bias_start_idx = 1+L
+                bias_end_idx = L*2
+                for (bias_p in bias_start_idx:bias_end_idx) {
+                    print("Bias_p=" + bias_p)
+                    param_start_idx = as.integer(as.scalar(masks_meta_info[bias_p,1]))
+                    param_end_idx   = as.integer(as.scalar(masks_meta_info[bias_p,2]))
+                    param_rows     = as.integer(as.scalar(masks_meta_info[bias_p,3]))
+                    param_cols     = as.integer(as.scalar(masks_meta_info[bias_p,4]))
+                    N = param_rows * param_cols   # bias length
+                    current_layer_idx = bias_p - L
+
+                    if (as.scalar(isSharedParam[1, bias_p])==1) {
+                        S = diag(matrix(1, rows=N, cols=1))  # identity TODO unnecessary overhead?
+                        selectorMatrices[current_layer_idx] = S
+                    }
+                    else {
+                        vec = masks[subnet, param_start_idx:param_end_idx]
+                        v = matrix(t(vec), rows=N, cols=1)
+                        k = as.integer(sum(v))
+                        if (k < 1) stop("No active neurons detected. In IST subnet models should have at least a single active neuron per layer.")
+
+                        p = cumsum(v)
+                        rIx = p + 1
+                        cIx = seq(1, N, 1)
+
+                        S_tmp = table(rIx, cIx, v, rows=k+1, cols=N)
+                        S = S_tmp[2:(k+1), ]
+                        selectorMatrices[current_layer_idx] = S
+                    }
+                }
+
+                subnet_model2 = subnetModelTemplate
+                for (subnet_p2 in 1:length(round_model)) {
+                    param_rows2     = as.integer(as.scalar(masks_meta_info[subnet_p2,3]))
+                    param_cols2     = as.integer(as.scalar(masks_meta_info[subnet_p2,4]))
+                    isBias = (param_rows2 == 1 | param_cols2 == 1)
+
+                    param2 = as.matrix(round_model[subnet_p2])
+                    current_layer_idx2 = ((subnet_p2 - 1) %% L) + 1
+                    S_curr = as.matrix(selectorMatrices[current_layer_idx2])
+
+                    if (isBias) {
+                        if (as.scalar(isSharedParam[1, subnet_p2])==1) {
+                            b_collapsed = param2
+                        }
+                        else {
+                            isRowBias = (nrow(param2) == 1)  # param2 can be 1xN or Nx1
+                            if (isRowBias) {
+                                param2 = t(param2)
+                            }
+                            b_collapsed = S_curr %*% param2
+                            if (isRowBias) {
+                                b_collapsed = t(b_collapsed) # convert back to original orientation
+                            }
+                        }
+                        subnet_model2[subnet_p2] = list(b_collapsed)
+                    }
+                    else{
+
+                        if (as.scalar(isSharedParam[1, subnet_p2])==1) {
+                            W_collapsed = param2
+                        }
+                        else if (current_layer_idx2==1) {
+                            W_collapsed = S_curr %*% t(param2)
+                        }
+                        else {
+                            S_prev = as.matrix(selectorMatrices[current_layer_idx2-1])
+                            if (as.scalar(isFC[1, current_layer_idx2-1])==0) {  # previous layer was not FC
+                                W_collapsed = S_curr %*% t(param2)
+                            }
+                            else if (current_layer_idx2==L) {
+                                W_collapsed = t(param2) %*% t(S_prev)
+                            }
+                            else if (as.scalar(isFC[1, current_layer_idx2+1])==0) {
+                                W_collapsed = t(param2) %*% t(S_prev)
+                            }
+                            else {
+                                W_collapsed = S_curr %*% t(param2) %*% t(S_prev)
+                            }
+                        }
+                        subnet_model2[subnet_p2] = list(t(W_collapsed))
+                    }
+                }
+                print("Layer3 - W - ORIGINAL")
+                #print(as.matrix(round_model[3]))
+                print("Rows="+nrow(as.matrix(round_model[3])))
+                print("Cols="+ncol(as.matrix(round_model[3])))
+                print("Layer3 - W - COLLAPSED")
+                #print(as.matrix(subnet_model2[3]))
+                print("Rows="+nrow(as.matrix(subnet_model2[3])))
+                print("Cols="+ncol(as.matrix(subnet_model2[3])))
+
+                print("Layer3 - b - ORIGINAL")
+                #print(as.matrix(round_model[7]))
+                print("Rows="+nrow(as.matrix(round_model[7])))
+                print("Cols="+ncol(as.matrix(round_model[7])))
+                print("Layer3 - b - COLLAPSED")
+                #print(as.matrix(subnet_model2[7]))
+                print("Rows="+nrow(as.matrix(subnet_model2[7])))
+                print("Cols="+ncol(as.matrix(subnet_model2[7])))
+
+                print("Layer4 - W - ORIGINAL")
+                #print(as.matrix(round_model[4]))
+                print("Rows="+nrow(as.matrix(round_model[4])))
+                print("Cols="+ncol(as.matrix(round_model[4])))
+                print("Layer4 - W - COLLAPSED")
+                #print(as.matrix(subnet_model2[4]))
+                print("Rows="+nrow(as.matrix(subnet_model2[4])))
+                print("Cols="+ncol(as.matrix(subnet_model2[4])))
+                # TODO - -- - - - - - - - tested until here!
+
                 # b.) local optimization steps / IST round
                 for (localStep in 1:localSteps) {
                     feat = as.matrix(shuffled_features[localStep])
                     lab = as.matrix(shuffled_labels[localStep])
 
                     # compute gradients for subnet s + apply update (SGD/Adam/etc.) on owned params (only)
-                    #subnet_model = as.list(evalList(upd, list(model=subnet_model, mask=subnet_model_mask, features=feat, labels=lab, hyperparams=hyperparams)))
+                    subnet_model2 = as.list(evalList(upd, list(model=subnet_model2, mask=subnet_model_mask, features=feat, labels=lab, hyperparams=hyperparams)))
                 }
+                stop("Update performed successfully!")
 
                 # c.) save updated subnet and mask
-                updatedSubnets[subnet] = list(subnet_model)
+                updatedSubnets[subnet] = list(subnet_model2)
                 updatedSubnetsMasks[subnet] = list(subnet_model_mask)
             }
             print(updatedSubnets)
